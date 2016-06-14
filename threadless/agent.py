@@ -36,10 +36,8 @@ class Agent(object):
 
 
     def thread_loop(self, thread):
-        @thread.tasklet('agent-status', period = 5, start = 0)
-        def task_status(task):
-            threadless.log.info('agent: event=status, uptime=%i', int(time.time() - self.start_time))
-        
+        pass
+
     ##
     ## Daemon interface
     ##
@@ -56,8 +54,12 @@ class Agent(object):
         self.thread.stop()
 
     def parent_thread(self, thread):
+        @thread.tasklet('status', period = 5, start = 0)
+        def task_status(task):
+            threadless.log.info('agent: event=status, uptime=%i',
+                                int(time.time() - self.start_time))
 
-        self.thread_loop(thread)
+        yield self.thread_loop(thread)
 
         while not thread.stopping:
             yield from thread.idle()
