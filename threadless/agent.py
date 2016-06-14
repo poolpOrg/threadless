@@ -35,7 +35,7 @@ class Agent(object):
         self.thread = threadless.async.Threadlet("agent", self.parent_thread)
 
 
-    def _main_loop(self, thread):
+    def thread_loop(self, thread):
         @thread.tasklet('agent-status', period = 5, start = 0)
         def task_status(task):
             threadless.log.info('agent: event=status, uptime=%i', int(time.time() - self.start_time))
@@ -57,7 +57,7 @@ class Agent(object):
 
     def parent_thread(self, thread):
 
-        self._main_loop(thread)
+        self.thread_loop(thread)
 
         while not thread.stopping:
             yield from thread.idle()
