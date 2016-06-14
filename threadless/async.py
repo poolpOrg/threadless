@@ -17,10 +17,12 @@
 
 import asyncio
 import collections
+import json
 import random
 import selectors
 import time
 import types
+import urllib.parse
 
 selector = selectors.SelectSelector()
 loop = asyncio.SelectorEventLoop(selector)
@@ -398,3 +400,244 @@ class Threadlet(object):
                     threadless.log.warn("threadlet: %s: wakeup: warning error=future-done, result=%r", self.name, future.result())
             else:
                 future.set_result(result)
+
+
+class APIException(Exception):
+    pass
+
+class APIError(APIException):
+    pass
+
+class APIHTTPError(APIException):
+    def __init__(self, code, body):
+        self.code = code
+        self.body = body
+
+def rest_query(url, data, method='POST', headers={}):
+    o = urllib.parse.urlparse(url)
+    host = o.hostname
+    port = o.port
+    path = o.path
+
+    if port == None:
+        if o.scheme == 'http':
+            port = 80
+        elif o.scheme == 'https':
+            port = 443
+
+    ssl = False
+    if o.scheme == 'https':
+        ssl = True
+
+    if data:
+        body = json.dumps(data)
+    else:
+        body = ""
+    query = ("%s %s HTTP/1.1\r\n"
+             "Host: %s\r\n"
+             "Content-Type: application/json\r\n"
+             "Content-Length: %i\r\n"
+             "Connection: close\r\n" % (method, path, host, len(body)))
+
+    for header in headers:
+        query += "%s: %s\r\n" % (header, headers[header])
+    query += "\r\n%s" % (body, )
+
+    try:
+        reader, writer = yield from asyncio.open_connection(host = host,
+                                                            port = port,
+                                                            ssl = ssl)
+        writer.write(query.encode())
+    except asyncio.ConnectionRefusedError:
+        raise APIError('connection refused')
+    except asyncio.ConnectionResetError:
+        raise APIError('connection reset while writing query')
+
+    try:
+        response = yield from reader.read()
+    except asyncio.ConnectionResetError:
+        raise APIError('connection reset while reading response')
+
+    headers, content = response.decode().split("\r\n\r\n", 1)
+    status = headers.split("\r\n")[0].split()[1]
+
+    chunked = False
+    for header in headers.split("\r\n"):
+        if header.lower().startswith('transfer-encoding:') and "chunked" in header.lower():
+            chunked = True
+            break
+
+    if chunked:
+        data  = ""
+        cdata = content
+        while True:
+            size, remain = cdata.split("\r\n", 1)
+            if not size:
+                break
+            size = int(size, 16)
+            if size == 0:
+                break
+            data += remain[:size]
+            cdata = remain[size:]
+        content = data
+
+    if not status.startswith('2'):
+        try:
+            result = json.loads(content)
+        except:
+            result = content
+        raise APIHTTPError(status, result)
+
+    result = json.loads(content)
+
+    return result
+
+
+class Call(object):
+
+    t_call = None
+    t_run = None
+    t_done = None
+
+    def __init__(self, queue, url, params, timeout, method):
+        self.queue = queue
+        self.url = url
+        self.params = params
+        self.timeout = timeout
+        self.method = method
+        self.future = asyncio.Future()
+        self.t_call = time.time()
+
+    def callback(self, task):
+        self.t_done = time.time()
+        self.queue.dt_done.append(self.t_done - self.t_run)
+        self.queue.running.remove(self)
+        if self.future.done():
+            threadless.log.info("callback for cancelled async call: %s", self.url)
+            return
+
+        exc = task.exception()
+        if exc:
+            # XXX intercept some
+            self.future.set_exception(exc)
+        else:
+            self.future.set_result(task.result())
+
+        self.queue.drain()
+
+    def run(self):
+        self.t_run = time.time()
+        self.queue.running.add(self)
+        self.queue.dt_run.append(self.t_run - self.t_call)
+        uri = self.url
+        asyncio.async(rest_query(uri, self.params, self.method)).add_done_callback(self.callback)
+
+
+class CallQueue(object):
+
+    n_call = 0
+    n_max_pending = 0
+
+    def __init__(self, name, running_max):
+        self.name = name
+        self.pending = collections.deque()
+        self.running = set()
+        self.running_max = running_max
+        self.dt_run = []
+        self.dt_done = []
+
+    def cancel(self):
+        while self.pending:
+            self.pending.popleft().future.cancel()
+        for a in self.running:
+            a.future.cancel()
+
+    def drain(self):
+        if not self.pending:
+            return
+        if len(self.running) >= self.running_max:
+            return
+        self.pending.popleft().run()
+
+    def call(self, url, params = {}, timeout = 60.0, method = 'POST'):
+        self.n_call += 1
+        a = Call(self, url, params, timeout, method)
+        self.pending.append(a)
+        self.n_max_pending = max(self.n_max_pending, len(self.pending))
+        self.drain()
+        return a.future
+
+    def stats(self):
+        def mean(l):
+            if not l:
+                return 0
+            return sum(l) / len(l)
+        res = { 'call': self.n_call,
+                'pending': len(self.pending),
+                'pending-max': self.n_max_pending,
+                'running': len(self.running),
+
+                'run': len(self.dt_run),
+                'run-min': self.dt_run and min(self.dt_run) or 0,
+                'run-max': self.dt_run and max(self.dt_run) or 0,
+                'run-mean': mean(self.dt_run),
+
+                'done': len(self.dt_done),
+                'done-min': self.dt_done and min(self.dt_done) or 0,
+                'done-max': self.dt_done and max(self.dt_done) or 0,
+                'done-mean': mean(self.dt_done),
+            }
+        self.n_call = 0
+        self.n_max_pending = len(self.pending)
+        self.dt_run = []
+        self.dt_done = []
+        return res
+
+    def log_stats(self, name = None, queue = None):
+        s = self.stats()
+        threadless.log.info("%s: event=call-queue, queue=%s, calls=%i, pending=%i, pending-max=%i, running=%i, run=%i(min=%.2f,max=%.2f,mean=%.2f), done=%i(min=%.2f,max=%.2f,mean=%.2f)",
+                            name or 'async',
+                            queue or self.name,
+                            s['call'],
+                            s['pending'],
+                            s['pending-max'],
+                            s['running'],
+                            s['run'],
+                            s['run-min'],
+                            s['run-max'],
+                            s['run-mean'],
+                            s['done'],
+                            s['done-min'],
+                            s['done-max'],
+                            s['done-mean'])
+
+class RESTCaller(object):
+
+    name = 'agent'
+    q = None
+
+    def __init__(self, name = None, running_max = None):
+        if name:
+            self.name = name
+        if running_max:
+            self.q = CallQueue(name, running_max)
+
+    def call(self, url, params = None, method = 'POST'):
+        try:
+            res = yield from self.q.call(url, params, method = method)
+        except APIError as exc:
+            threadless.log.warn('%s: api-error, url=%s, error=%s', self.name, url, exc)
+            raise
+        except APIHTTPError as exc:
+            threadless.log.warn('%s: api-http-error, url=%s, code=%s, error=%s', self.name, url, exc.code, exc.body)
+            raise
+        except:
+            threadless.log.exception('%s: url=%s', self.name, url)
+            raise
+        return res
+
+    def get(self, url):
+        return self.call(url, method = 'GET')
+
+    def post(self, url, params = None):
+        return self.call(url, params = params, method = 'POST')
