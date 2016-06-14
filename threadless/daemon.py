@@ -191,24 +191,13 @@ class Daemon(object):
             pid = self.get_pid()
         if pid is None:
             return False
-        procname = self.procname
 
-        for line in os.popen("ps auxwww").read().split("\n"):
-            parts = line.split()
-            if not parts:
-                continue
-            if parts[0] != self.username:
-                continue
-            try:
-                ppid = int(parts[1])
-            except:
-                continue
-            if ppid != pid:
-                continue
-            if procname in parts or self.procname in parts:
-                return True
+        try:
+            os.kill(pid, 0)
+            return True
+        except:
+            return False
 
-        return False
 
     def status(self):
         return self.is_running() is not None
