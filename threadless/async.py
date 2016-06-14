@@ -29,9 +29,6 @@ loop = asyncio.get_event_loop()
 
 import threadless.log
 
-class Timeout(Exception):
-    pass
-
 
 _task_cancel = object()
 
