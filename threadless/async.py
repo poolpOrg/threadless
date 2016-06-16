@@ -83,8 +83,6 @@ class Eventlet(object):
             timestamp = time.time()
         return self.timestamp - timestamp
 
-    #def elapsed(self, offset = 0):
-    #    return self.timestamp + offset < time.time()
 
 class Tasklet(object):
 
@@ -153,7 +151,6 @@ class Tasklet(object):
 
     def resume(self):
         if not self.suspended:
-            #threadless.log.warn("threadlet: %s: tasklet(%s): resume: warning error=not-suspended", self.name)
             return
         del self.suspended
         self.threadlet.debug('threadlet: %s: tasklet(%s): resume: timestamp=%.2f',
