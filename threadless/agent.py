@@ -15,6 +15,7 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
+import socket
 import time
 
 import threadless.async
@@ -31,6 +32,10 @@ class Agent(object):
 
     def uptime(self):
         return time.time() - self.start_time
+
+    def hostname(self):
+        return socket.getaddrinfo(socket.gethostname(), 0, 0, 0, 0,
+                                  socket.AI_CANONNAME)[0][3]
 
     def thread_loop(self, thread):
         pass
