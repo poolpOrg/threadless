@@ -203,7 +203,6 @@ class Threadlet(object):
     stopping = False
 
     _debug = False
-    _started = 0
 
     def __init__(self, name, main = default_main):
         self.name = name
@@ -270,7 +269,6 @@ class Threadlet(object):
         assert self.loop is None
 
         def done(future):
-            Threadlet._started -= 1
             del self.main
             del self.loop
             self.timeouts.clear()
@@ -293,7 +291,6 @@ class Threadlet(object):
                 if result is not None:
                     threadless.log.warn("threadlet: %s: result: %r", self.name, result)
 
-        Threadlet._started += 1
         self.loop = asyncio.async(self._main_loop(delay, jitter))
         self.loop.add_done_callback(done)
         return self.loop
