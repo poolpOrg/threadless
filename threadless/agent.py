@@ -29,6 +29,8 @@ class Agent(object):
     def __init__(self):
         self.thread = threadless.async.Threadlet("agent", self.parent_thread)
 
+    def uptime(self):
+        return time.time() - self.start_time
 
     def thread_loop(self, thread):
         pass
@@ -49,10 +51,6 @@ class Agent(object):
         self.thread.stop()
 
     def parent_thread(self, thread):
-        @thread.tasklet('status', period = 5, start = 0)
-        def task_status(task):
-            threadless.log.info('agent: event=status, uptime=%i',
-                                int(time.time() - self.start_time))
 
         yield self.thread_loop(thread)
 
