@@ -15,11 +15,6 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-import collections
-import hashlib
-import math
-import random
-import sys
 import time
 
 import threadless.async
