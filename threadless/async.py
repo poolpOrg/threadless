@@ -381,7 +381,7 @@ class Threadlet(object):
         self.signals.add(signal)
         self.wakeup()
 
-    def wakeup(self, result = None):
+    def wakeup(self):
         if self.future:
             future = self.future
             del self.future
@@ -393,7 +393,7 @@ class Threadlet(object):
                 else:
                     threadless.log.warn("threadlet: %s: wakeup: warning error=future-done, result=%r", self.name, future.result())
             else:
-                future.set_result(result)
+                future.set_result(None)
 
 
 class APIException(Exception):
