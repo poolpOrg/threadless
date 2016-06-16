@@ -217,7 +217,7 @@ class Threadlet(object):
 
     def debug(self, *args):
         if self._debug:
-            threadless.log.info(*args)
+            threadless.log.debug(*args)
 
     def eventlet(self, name):
         return Eventlet(self, name)
@@ -265,7 +265,7 @@ class Threadlet(object):
                 yield from asyncio.sleep(delay + jitter * random.random())
                 del self.sleeping
             except asyncio.CancelledError:
-                threadless.log.debug("threadlet: %s: sleep interrupted", self.name)
+                self.debug("threadlet: %s: sleep interrupted", self.name)
 
         yield from self.main(self)
 
