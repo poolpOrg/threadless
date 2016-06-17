@@ -60,6 +60,7 @@ def exception(*args):
         except:
             ctx = "???" + repr(args)
         trace = ctx + "\n---\n" + trace
+        info(trace)
 
 def future(future, *args):
     if future.exception():

@@ -15,11 +15,7 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-import collections
-import hashlib
-import math
-import random
-import sys
+import socket
 import time
 
 import threadless.async
@@ -34,6 +30,12 @@ class Agent(object):
     def __init__(self):
         self.thread = threadless.async.Threadlet("agent", self.parent_thread)
 
+    def uptime(self):
+        return time.time() - self.start_time
+
+    def hostname(self):
+        return socket.getaddrinfo(socket.gethostname(), 0, 0, 0, 0,
+                                  socket.AI_CANONNAME)[0][3]
 
     def thread_loop(self, thread):
         pass
@@ -54,10 +56,6 @@ class Agent(object):
         self.thread.stop()
 
     def parent_thread(self, thread):
-        @thread.tasklet('status', period = 5, start = 0)
-        def task_status(task):
-            threadless.log.info('agent: event=status, uptime=%i',
-                                int(time.time() - self.start_time))
 
         yield self.thread_loop(thread)
 
