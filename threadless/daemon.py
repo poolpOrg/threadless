@@ -33,7 +33,6 @@ import multiprocessing
 
 import threadless.log
 
-DAEMONIZE = 1
 USERNAME  = "_threadless"
 PIDFILE = None
 
@@ -62,13 +61,17 @@ class Daemon(object):
                  syslog = True,
                  pidfile = None,
                  stdout = None,
-                 stderr = None):
+                 stderr = None,
+                 daemonize = True,
+                 prng_reseed = None):
         self.procname = procname
         self.syslog = syslog
         self.pidfile = pidfile
         self.username = username
         self.stdout = stdout
         self.stderr = stderr
+        self.daemonize = daemonize
+        self.prng_reseed = prng_reseed
 
     def _open_log(self, syslog = None, debug = None):
         threadless.log.setup(self.procname, debug = debug)
@@ -99,12 +102,12 @@ class Daemon(object):
         os.setresuid(self.pw.pw_uid, self.pw.pw_uid, self.pw.pw_uid)
 
     def _daemonize(self):
-        if DAEMONIZE == 2:
-            return
+        if self.prng_reseed:
+            self.prng_reseed()
         try:
             pid = os.fork() 
             if pid > 0:
-                sys.exit(0) 
+                sys.exit(0)
         except OSError as e: 
             sys.stderr.write("Cannot fork: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1)
@@ -112,6 +115,9 @@ class Daemon(object):
         os.setsid() 
         #os.chdir("/") 
         #os.umask(0) 
+
+        if self.prng_reseed:
+            self.prng_reseed()
 
         # do second fork
         try: 
@@ -121,6 +127,9 @@ class Daemon(object):
         except OSError as e: 
             sys.stderr.write("Cannot fork: %d (%s)\n" % (e.errno, e.strerror))
             sys.exit(1) 
+
+        if self.prng_reseed:
+            self.prng_reseed()
 
         if self.stdout:
             self._stdout = IO(self.stdout, sys.stdout)
@@ -234,7 +243,7 @@ class Daemon(object):
 
     def start(self, start, stop = None, setup = None, foreground = None):
         if foreground is None:
-            foreground = not DAEMONIZE
+            foreground = not self.daemonize
 
         if self.pidfile and self.is_running():
             message = "Error: process \"%s\" is already running with pid %i\n"
