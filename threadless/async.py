@@ -32,11 +32,6 @@ loop = asyncio.get_event_loop()
 import threadless.log
 
 
-_task_cancel = object()
-
-_task_suspend = object()
-
-
 class Eventlet(object):
 
     timestamp = None
@@ -90,6 +85,7 @@ class Tasklet(object):
 
     running = None
     suspended = False
+    cancelled = False
 
     period = None
     jitter = None
@@ -110,11 +106,9 @@ class Tasklet(object):
             jitter = self.jitter
         if jitter:
             delay += delay * (random.random() - .5) * jitter
-        return self.schedule_at(time.time() + delay)
+        self.schedule_at(time.time() + delay)
 
     def schedule_at(self, timestamp):
-        if self.running:
-            return timestamp
         if self in self.threadlet.timeouts:
             self.threadlet.timeouts.remove(self)
         self.threadlet.debug('threadlet: %s: tasklet(%s): schedule: dt=%.02f',
@@ -126,8 +120,7 @@ class Tasklet(object):
         self.threadlet.wakeup()
 
     def cancel(self):
-        if self.running:
-            return _task_cancel
+        self.cancelled = True
         if self in self.threadlet.timeouts:
             self.threadlet.debug('threadlet: %s: tasklet(%s): cancel',
                                  self.threadlet.name,
@@ -140,8 +133,6 @@ class Tasklet(object):
         if self.suspended:
             return
         self.suspended = True
-        if self.running:
-            return _task_suspend
         if self in self.threadlet.timeouts:
             self.threadlet.debug('threadlet: %s: tasklet(%s): suspend',
                                  self.threadlet.name,
@@ -164,12 +155,10 @@ class Tasklet(object):
 
         def _reschedule(when, relative):
             del self.running
-            if when is _task_suspend:
+            if self.suspended or self.cancelled:
                 pass
-            elif when is _task_cancel:
-                del self.threadlet.tasklets[self.name]
             elif when is None:
-                if self.period:
+                if self.period and self not in self.threadlet.timeouts:
                     self.schedule(self.period)
             else:
                 self.schedule_at(when + relative)
@@ -181,7 +170,7 @@ class Tasklet(object):
             if isinstance(value, types.GeneratorType):
                 value = yield from value
             self.threadlet.debug("threadlet: %s: tasklet(%s): done", self.threadlet.name, self.name)
-            _reschedule(value, 0)
+            _reschedule(None, 0)
         except asyncio.CancelledError:
             threadless.log.warn("threadlet: %s: tasklet(%s): cancelled", self.threadlet.name, self.name)
             _reschedule(self.on_cancel, time.time())
