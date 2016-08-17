@@ -185,7 +185,6 @@ class Threadlet(object):
 
     future = None
     loop = None
-    sleeping = False
     stopping = False
 
     _debug = False
@@ -235,20 +234,6 @@ class Threadlet(object):
 
     def reschedule_at(self, taskName, timestamp):
         self.tasklets[taskName].schedule_at(timestamp)
-
-    def _main_loop(self, delay, jitter):
-
-        self.debug("threadlet: %s: starting", self.name)
-
-        if delay:
-            try:
-                self.sleeping = True
-                yield from asyncio.sleep(delay + jitter * random.random())
-                del self.sleeping
-            except asyncio.CancelledError:
-                self.debug("threadlet: %s: sleep interrupted", self.name)
-
-        yield from self.main(self)
 
     def start(self, func = None, delay = 0, jitter = 0, when_done = None, wait = False):
         assert self.loop is None
