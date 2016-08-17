@@ -28,7 +28,7 @@ class Agent(object):
     configured = False
     
     def __init__(self):
-        self.thread = threadless.async.Threadlet("agent", self.parent_thread)
+        self.thread = threadless.async.Threadlet("agent")
 
     def uptime(self):
         return time.time() - self.start_time
@@ -46,7 +46,7 @@ class Agent(object):
     def start(self):
         self.start_time = time.time()
         threadless.log.info("agent: started")
-        threadless.async.loop.run_until_complete(self.thread.start())
+        self.thread.start(func = self.parent_thread, wait = True)
         threadless.log.info("agent: stopped")
 
     def stop(self):

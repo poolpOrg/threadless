@@ -190,11 +190,6 @@ class Tasklet(object):
             _reschedule(self.on_exception, time.time())
 
 
-def default_main(thread):
-    while not thread.stopping:
-        yield from thread.idle()
-
-
 class Threadlet(object):
 
     future = None
@@ -204,9 +199,8 @@ class Threadlet(object):
 
     _debug = False
 
-    def __init__(self, name, main = default_main):
-        self.name = name
-        self.main = main
+    def __init__(self, name = None):
+        self.name = name or 'Threadlet(%d)' % id(self)
         self.timeouts = set()
         self.signals = set()
         self.tasklets = {}
@@ -265,22 +259,14 @@ class Threadlet(object):
 
         yield from self.main(self)
 
-    def start(self, delay = 0, jitter = 0, when_done = None):
+    def start(self, func = None, delay = 0, jitter = 0, when_done = None, wait = False):
         assert self.loop is None
 
-        def done(future):
-            del self.main
-            del self.loop
-            self.timeouts.clear()
-            self.signals.clear()
-            
-            if when_done is not None:
-                try:
-                    when_done(future)
-                except:
-                    threadless.log.exception("threadlet: %s: when-done", self.name)
-                return
+        def default_func(thread):
+            while not thread.stopping:
+                yield from thread.idle()
 
+        def default_done(future):
             if future.cancelled():
                 threadless.log.warn("threadlet: %s: cancelled?", self.name)
             elif future.exception():
@@ -291,9 +277,30 @@ class Threadlet(object):
                 if result is not None:
                     threadless.log.warn("threadlet: %s: result: %r", self.name, result)
 
-        self.loop = asyncio.async(self._main_loop(delay, jitter))
+        def run():
+            if delay:
+                d = delay
+                if jitter:
+                    d += d * (random.random() - .5) * jitter
+                # XXX make this interruptible on stop
+                yield from asyncio.sleep(d)
+            yield from (func or default_func)(self)
+
+        def done(future):
+            del self.main
+            del self.loop
+            self.timeouts.clear()
+            self.signals.clear()
+
+            try:
+                (when_done or default_done)(future)
+            except:
+                threadless.log.exception("threadlet: %s: when-done", self.name)
+
+        self.loop = asyncio.async(run())
         self.loop.add_done_callback(done)
-        return self.loop
+        if wait:
+            loop.run_until_complete(self.loop)
 
     def stop(self):
         self.stopping = True
