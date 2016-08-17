@@ -253,7 +253,6 @@ class Threadlet(object):
             yield from (func or default_func)(self)
 
         def done(future):
-            del self.main
             del self.loop
             self.timeouts.clear()
             self.signals.clear()
