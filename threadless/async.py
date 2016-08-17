@@ -24,10 +24,11 @@ import time
 import types
 import urllib.parse
 
-selector = selectors.SelectSelector()
-loop = asyncio.SelectorEventLoop(selector)
-asyncio.set_event_loop(loop)
-loop = asyncio.get_event_loop()
+def _setup():
+    selector = selectors.SelectSelector()
+    loop = asyncio.SelectorEventLoop(selector)
+    asyncio.set_event_loop(loop)
+_setup()
 
 import threadless.log
 
@@ -35,14 +36,14 @@ import threadless.log
 class Eventlet(object):
 
     timestamp = None
-    
+
     def __init__(self, threadlet, name):
         self.threadlet = threadlet
         self.name = name
 
     def __repr__(self):
         return 'eventlet(%s)' % self.name
-        
+
     def set(self, delay, earlier = True, later = True):
         self.set_at(time.time() + delay, earlier = earlier, later = later)
 
@@ -52,7 +53,7 @@ class Eventlet(object):
                 return
             if not later and self.timestamp < timestamp:
                 return
-        self.threadlet.debug('threadlet: %s: eventlet(%s): set: dt=%.02f',
+        threadless.log.debug('threadlet: %s: eventlet(%s): set: dt=%.02f',
                              self.threadlet.name,
                              self.name,
                              timestamp - time.time())
@@ -64,7 +65,7 @@ class Eventlet(object):
         if self.timestamp:
             del self.timestamp
             if self in self.threadlet.timeouts:
-                self.threadlet.debug('threadlet: %s: eventlet(%s): unset',
+                threadless.log.debug('threadlet: %s: eventlet(%s): unset',
                                      self.threadlet.name,
                                      self.name)
                 self.threadlet.timeouts.remove(self)
@@ -108,7 +109,7 @@ class Tasklet(object):
     def schedule_at(self, timestamp):
         if self in self.threadlet.timeouts:
             self.threadlet.timeouts.remove(self)
-        self.threadlet.debug('threadlet: %s: tasklet(%s): schedule: dt=%.02f',
+        threadless.log.debug('threadlet: %s: tasklet(%s): schedule: dt=%.02f',
                              self.threadlet.name,
                              self.name,
                              timestamp - time.time())
@@ -120,7 +121,7 @@ class Tasklet(object):
     def cancel(self):
         self.cancelled = True
         if self in self.threadlet.timeouts:
-            self.threadlet.debug('threadlet: %s: tasklet(%s): cancel',
+            threadless.log.debug('threadlet: %s: tasklet(%s): cancel',
                                  self.threadlet.name,
                                  self.name)
             self.threadlet.timeouts.remove(self)
@@ -132,7 +133,7 @@ class Tasklet(object):
             return
         self.suspended = True
         if self in self.threadlet.timeouts:
-            self.threadlet.debug('threadlet: %s: tasklet(%s): suspend',
+            threadless.log.debug('threadlet: %s: tasklet(%s): suspend',
                                  self.threadlet.name,
                                  self.name)
             self.threadlet.timeouts.remove(self)
@@ -142,7 +143,7 @@ class Tasklet(object):
         if not self.suspended:
             return
         del self.suspended
-        self.threadlet.debug('threadlet: %s: tasklet(%s): resume: timestamp=%.2f',
+        threadless.log.debug('threadlet: %s: tasklet(%s): resume: timestamp=%.2f',
                              self.threadlet.name,
                              self.name,
                              self.timestamp - time.time())
@@ -151,14 +152,14 @@ class Tasklet(object):
         self.threadlet.wakeup()
 
     def run(self):
-        self.threadlet.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
+        threadless.log.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
         self.running = True
 
         try:
             value = self.func(self)
             if isinstance(value, types.GeneratorType):
                 value = yield from value
-            self.threadlet.debug("threadlet: %s: tasklet(%s): done", self.threadlet.name, self.name)
+            threadless.log.debug("threadlet: %s: tasklet(%s): done", self.threadlet.name, self.name)
         except asyncio.CancelledError:
             threadless.log.warn("threadlet: %s: tasklet(%s): cancelled", self.threadlet.name, self.name)
         except:
@@ -177,17 +178,11 @@ class Threadlet(object):
     loop = None
     stopping = False
 
-    _debug = False
-
     def __init__(self, name = None):
         self.name = name or 'Threadlet(%d)' % id(self)
         self.timeouts = set()
         self.signals = set()
         self.tasklets = {}
-
-    def debug(self, *args):
-        if self._debug:
-            threadless.log.debug(*args)
 
     def eventlet(self, name):
         return Eventlet(self, name)
@@ -265,7 +260,7 @@ class Threadlet(object):
         self.loop = asyncio.async(run())
         self.loop.add_done_callback(done)
         if wait:
-            loop.run_until_complete(self.loop)
+            asyncio.get_event_loop().run_until_complete(self.loop)
 
     def stop(self):
         self.stopping = True
@@ -275,7 +270,7 @@ class Threadlet(object):
         """
         Sleep until one of the registered timeout expires
         """
-        self.debug('threadlet: %s: idle: enter, signals=%r', self.name, self.signals)
+        threadless.log.debug('threadlet: %s: idle: enter, signals=%r', self.name, self.signals)
 
         assert self.future is None
 
@@ -305,16 +300,16 @@ class Threadlet(object):
                 self.future = asyncio.Future()
                 try:
                     if delay:
-                        self.debug('threadlet: %s: idle: sleep(dt=%.02f), signals=%r', self.name, delay, self.signals)
+                        threadless.log.debug('threadlet: %s: idle: sleep(dt=%.02f), signals=%r', self.name, delay, self.signals)
                         event = yield from asyncio.wait_for(self.future, delay)
                     else:
-                        self.debug('threadlet: %s: idle: sleep, signals=%r', self.name, self.signals)
+                        threadless.log.debug('threadlet: %s: idle: sleep, signals=%r', self.name, self.signals)
                         event = yield from self.future
-                        self.debug('threadlet: %s: idle: wakeup, signals=%r', self.name, self.signals)
+                        threadless.log.debug('threadlet: %s: idle: wakeup, signals=%r', self.name, self.signals)
                 except asyncio.TimeoutError:
-                    self.debug('threadlet: %s: idle: timeout, signals=%r', self.name, self.signals)
+                    threadless.log.debug('threadlet: %s: idle: timeout, signals=%r', self.name, self.signals)
                 except asyncio.CancelledError:
-                    self.debug('threadlet: %s: idle: cancelled, signals=%r', self.name, self.signals)
+                    threadless.log.debug('threadlet: %s: idle: cancelled, signals=%r', self.name, self.signals)
                 finally:
                     if self.future:
                         del self.future
@@ -332,10 +327,10 @@ class Threadlet(object):
                     break
                 if isinstance(event, Tasklet):
                     if event.suspended:
-                        self.debug('threadlet: %s: run-suspended: %s', self.name, event.name)
+                        threadless.log.debug('threadlet: %s: run-suspended: %s', self.name, event.name)
                         continue
                     if event.cancelled:
-                        self.debug('threadlet: %s: run-cancelled: %s', self.name, event.name)
+                        threadless.log.debug('threadlet: %s: run-cancelled: %s', self.name, event.name)
                         continue
                     yield from event.run()
                 elif isinstance(event, Eventlet):
@@ -344,7 +339,7 @@ class Threadlet(object):
             events.update(self.signals)
             self.signals.clear()
 
-            self.debug('threadlet: %s: idle: leave signals=%r, events=%r', self.name, self.signals, events)
+            threadless.log.debug('threadlet: %s: idle: leave signals=%r, events=%r', self.name, self.signals, events)
 
             if events:
                 return events
@@ -352,7 +347,7 @@ class Threadlet(object):
         return set(['exit'])
 
     def signal(self, signal):
-        self.debug('threadlet: %s: signal: %r', self.name, signal)
+        threadless.log.debug('threadlet: %s: signal: %r', self.name, signal)
         self.signals.add(signal)
         self.wakeup()
 
