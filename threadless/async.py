@@ -89,9 +89,6 @@ class Tasklet(object):
 
     period = None
     jitter = None
-    on_cancel = None
-    on_timeout = None
-    on_exception = None
 
     def __init__(self, threadlet, name, func):
         self.threadlet = threadlet
@@ -154,31 +151,24 @@ class Tasklet(object):
         self.threadlet.wakeup()
 
     def run(self):
-
-        def _reschedule(when, relative):
-            del self.running
-            if self.suspended or self.cancelled:
-                pass
-            elif when is None:
-                if self.period and self not in self.threadlet.timeouts:
-                    self.schedule(self.period)
-            else:
-                self.schedule_at(when + relative)
+        self.threadlet.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
+        self.running = True
 
         try:
-            self.threadlet.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
-            self.running = True
             value = self.func(self)
             if isinstance(value, types.GeneratorType):
                 value = yield from value
             self.threadlet.debug("threadlet: %s: tasklet(%s): done", self.threadlet.name, self.name)
-            _reschedule(None, 0)
         except asyncio.CancelledError:
             threadless.log.warn("threadlet: %s: tasklet(%s): cancelled", self.threadlet.name, self.name)
-            _reschedule(self.on_cancel, time.time())
         except:
             threadless.log.exception("threadlet: %s: tasklet(%s): exception", self.threadlet.name, self.name)
-            _reschedule(self.on_exception, time.time())
+
+        del self.running
+        if self.suspended or self.cancelled:
+            return
+        if self.period and self not in self.threadlet.timeouts:
+            self.schedule(self.period)
 
 
 class Threadlet(object):
