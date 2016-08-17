@@ -116,7 +116,8 @@ class Tasklet(object):
                              self.name,
                              timestamp - time.time())
         self.timestamp = timestamp
-        self.threadlet.timeouts.add(self)
+        if not (self.cancelled or self.suspended):
+            self.threadlet.timeouts.add(self)
         self.threadlet.wakeup()
 
     def cancel(self):
@@ -148,7 +149,8 @@ class Tasklet(object):
                              self.threadlet.name,
                              self.name,
                              self.timestamp - time.time())
-        self.threadlet.timeouts.add(self)
+        if not self.cancelled:
+            self.threadlet.timeouts.add(self)
         self.threadlet.wakeup()
 
     def run(self):
@@ -357,6 +359,9 @@ class Threadlet(object):
                 if isinstance(event, Tasklet):
                     if event.suspended:
                         self.debug('threadlet: %s: run-suspended: %s', self.name, event.name)
+                        continue
+                    if event.cancelled:
+                        self.debug('threadlet: %s: run-cancelled: %s', self.name, event.name)
                         continue
                     yield from event.run()
                 elif isinstance(event, Eventlet):
