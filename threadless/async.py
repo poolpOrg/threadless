@@ -152,6 +152,15 @@ class Tasklet(object):
             self.threadlet.timeouts.add(self)
             self.threadlet.wakeup()
 
+    def is_scheduled(self):
+        return self in self.threadlet.timeouts
+
+    def is_pending(self):
+        return self in self.threadlet.expired
+
+    def is_running(self):
+        return self.running
+
     def run(self):
         threadless.log.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
         self.running = True
@@ -208,6 +217,7 @@ class Threadlet(object):
         self.timeouts = set()
         self.signals = set()
         self.tasklets = {}
+        self.expired = set()
 
     def eventlet(self, name):
         return Eventlet(self, name)
@@ -226,9 +236,18 @@ class Threadlet(object):
             return func
         return _
 
-    def tasks(self, pattern = '*'):
+    def tasks(self, pattern = '*', suspended = None, scheduled = None, pending = None, running = None):
         t = TaskSet()
         for name in fnmatch.filter(self.tasklets.keys(), pattern):
+            task = self.tasklets[name]
+            if suspended is not None and task.suspended != suspended:
+                continue
+            if scheduled is not None and task.is_scheduled() != scheduled:
+                continue
+            if pending is not None and task.is_pending() != pending:
+                continue
+            if running is not None and task.is_running() != running:
+                continue
             t.add(self.tasklets[name])
         return t
 
@@ -305,24 +324,19 @@ class Threadlet(object):
 
         assert self.future is None
 
-        # 1. check for expired timeouts
         def _expired():
             def sort_by_timeout(a, b):
                 return cmp(a.timestamp, b.timestamp)
-            expired = set()
             now = time.time()
             for timeout in sorted(self.timeouts, key=lambda x: x.timestamp):
                 if timeout.timestamp > now:
-                    return expired, timeout.timestamp
-                expired.add(timeout)
-            return expired, None
+                    return timeout.timestamp
+                self.expired.add(timeout)
 
         while not self.stopping:
-
-            expired, timestamp = _expired()
-
-            while not (expired or self.signals):
-
+            # check for expired timeouts
+            timestamp = _expired()
+            while not (self.expired or self.signals):
                 if timestamp is None:
                     delay = None
                 else:
@@ -332,10 +346,10 @@ class Threadlet(object):
                 try:
                     if delay:
                         threadless.log.debug('threadlet: %s: idle: sleep(dt=%.02f), signals=%r', self.name, delay, self.signals)
-                        event = yield from asyncio.wait_for(self.future, delay)
+                        yield from asyncio.wait_for(self.future, delay)
                     else:
                         threadless.log.debug('threadlet: %s: idle: sleep, signals=%r', self.name, self.signals)
-                        event = yield from self.future
+                        yield from self.future
                         threadless.log.debug('threadlet: %s: idle: wakeup, signals=%r', self.name, self.signals)
                 except asyncio.TimeoutError:
                     threadless.log.debug('threadlet: %s: idle: timeout, signals=%r', self.name, self.signals)
@@ -347,15 +361,15 @@ class Threadlet(object):
 
                 if self.stopping:
                     break
+                timestamp = _expired()
 
-                expired, timestamp = _expired()
-
-            self.timeouts.difference_update(expired)
+            self.timeouts.difference_update(self.expired)
 
             events = set()
-            for event in expired:
+            for event in set(self.expired):
                 if self.stopping:
                     break
+                self.expired.remove(event)
                 if isinstance(event, Tasklet):
                     if event.suspended:
                         threadless.log.debug('threadlet: %s: run-suspended: %s', self.name, event.name)
@@ -366,7 +380,7 @@ class Threadlet(object):
                     yield from event.run()
                 elif isinstance(event, Eventlet):
                     events.add(event)
-
+            self.expired.clear()
             events.update(self.signals)
             self.signals.clear()
 
@@ -375,7 +389,7 @@ class Threadlet(object):
             if events:
                 return events
 
-        return set(['exit'])
+        return set()
 
     def signal(self, signal):
         threadless.log.debug('threadlet: %s: signal: %r', self.name, signal)
