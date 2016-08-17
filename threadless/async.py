@@ -17,6 +17,7 @@
 
 import asyncio
 import collections
+import fnmatch
 import json
 import random
 import selectors
@@ -171,6 +172,30 @@ class Tasklet(object):
         if self.period and self not in self.threadlet.timeouts:
             self.schedule(self.period)
 
+class TaskSet(object):
+
+    def __init__(self):
+        self.tasks = set()
+
+    def __iter__(self):
+        for task in self.tasks:
+            yield task
+
+    def add(self, task):
+        self.tasks.add(task)
+
+    def suspend(self):
+        for task in self:
+            task.suspend()
+
+    def resume(self):
+        for task in self:
+            task.resume()
+
+    def cancel(self):
+        for task in self:
+            task.cancel()
+
 
 class Threadlet(object):
 
@@ -200,6 +225,12 @@ class Threadlet(object):
             task.schedule_at(start)
             return func
         return _
+
+    def tasks(self, pattern = '*'):
+        t = TaskSet()
+        for name in fnmatch.filter(self.tasklets.keys(), pattern):
+            t.add(self.tasklets[name])
+        return t
 
     def suspend(self, *taskNames):
         for name in taskNames:
