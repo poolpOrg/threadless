@@ -149,7 +149,7 @@ class Tasklet(object):
                              self.timestamp - time.time())
         if not self.cancelled:
             self.threadlet.timeouts.add(self)
-        self.threadlet.wakeup()
+            self.threadlet.wakeup()
 
     def run(self):
         threadless.log.debug("threadlet: %s: tasklet(%s): running", self.threadlet.name, self.name)
