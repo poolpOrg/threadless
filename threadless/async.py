@@ -25,14 +25,13 @@ import time
 import types
 import urllib.parse
 
+import threadless.log
+
 def _setup():
     selector = selectors.SelectSelector()
     loop = asyncio.SelectorEventLoop(selector)
     asyncio.set_event_loop(loop)
 _setup()
-
-import threadless.log
-
 
 class Eventlet(object):
 
@@ -172,7 +171,7 @@ class Tasklet(object):
             threadless.log.debug("threadlet: %s: tasklet(%s): done", self.threadlet.name, self.name)
         except asyncio.CancelledError:
             threadless.log.warn("threadlet: %s: tasklet(%s): cancelled", self.threadlet.name, self.name)
-        except:
+        except Exception:
             threadless.log.exception("threadlet: %s: tasklet(%s): exception", self.threadlet.name, self.name)
 
         del self.running
@@ -237,7 +236,7 @@ class Threadlet(object):
         return _
 
     def tasks(self, pattern = '*', suspended = None, scheduled = None, pending = None, running = None):
-        t = TaskSet()
+        task_set = TaskSet()
         for name in fnmatch.filter(self.tasklets.keys(), pattern):
             task = self.tasklets[name]
             if suspended is not None and task.suspended != suspended:
@@ -248,8 +247,8 @@ class Threadlet(object):
                 continue
             if running is not None and task.is_running() != running:
                 continue
-            t.add(self.tasklets[name])
-        return t
+            task_set.add(self.tasklets[name])
+        return task_set
 
     def suspend(self, *taskNames):
         for name in taskNames:
@@ -261,14 +260,14 @@ class Threadlet(object):
             if name in self.tasklets:
                 self.tasklets[name].resume()
 
-    def is_running(self, taskName):
-        return self.tasklets[taskName].running
+    def is_running(self, task_name):
+        return self.tasklets[task_name].running
 
-    def reschedule(self, taskName, delay = 0):
-        self.reschedule_at(taskName, time.time() + delay)
+    def reschedule(self, task_name, delay = 0):
+        self.reschedule_at(task_name, time.time() + delay)
 
-    def reschedule_at(self, taskName, timestamp):
-        self.tasklets[taskName].schedule_at(timestamp)
+    def reschedule_at(self, task_name, timestamp):
+        self.tasklets[task_name].schedule_at(timestamp)
 
     def start(self, func = None, delay = 0, jitter = 0, when_done = None, wait = False):
         assert self.loop is None
@@ -290,11 +289,11 @@ class Threadlet(object):
 
         def run():
             if delay:
-                d = delay
+                sleep_time = delay
                 if jitter:
-                    d += d * (random.random() - .5) * jitter
+                    sleep_time += sleep_time * (random.random() - .5) * jitter
                 # XXX make this interruptible on stop
-                yield from asyncio.sleep(d)
+                yield from asyncio.sleep(sleep_time)
             yield from (func or default_func)(self)
 
         def done(future):
@@ -304,10 +303,10 @@ class Threadlet(object):
 
             try:
                 (when_done or default_done)(future)
-            except:
+            except Exception:
                 threadless.log.exception("threadlet: %s: when-done", self.name)
 
-        self.loop = asyncio.async(run())
+        self.loop = asyncio.ensure_future(run())
         self.loop.add_done_callback(done)
         if wait:
             asyncio.get_event_loop().run_until_complete(self.loop)
@@ -325,8 +324,6 @@ class Threadlet(object):
         assert self.future is None
 
         def _expired():
-            def sort_by_timeout(a, b):
-                return cmp(a.timestamp, b.timestamp)
             now = time.time()
             for timeout in sorted(self.timeouts, key=lambda x: x.timestamp):
                 if timeout.timestamp > now:
@@ -419,23 +416,25 @@ class APIError(APIException):
 
 class APIHTTPError(APIException):
     def __init__(self, code, body):
+        super().__init__()
         self.code = code
         self.body = body
 
-def rest_query(url, data, method='POST', headers={}):
-    o = urllib.parse.urlparse(url)
-    host = o.hostname
-    port = o.port
-    path = o.path
+def rest_query(url, data, method='POST', headers=None):
+    headers = headers or {}
+    parsed_url = urllib.parse.urlparse(url)
+    host = parsed_url.hostname
+    port = parsed_url.port
+    path = parsed_url.path
 
-    if port == None:
-        if o.scheme == 'http':
+    if port is None:
+        if parsed_url.scheme == 'http':
             port = 80
-        elif o.scheme == 'https':
+        elif parsed_url.scheme == 'https':
             port = 443
 
     ssl = False
-    if o.scheme == 'https':
+    if parsed_url.scheme == 'https':
         ssl = True
 
     if data:
@@ -457,14 +456,14 @@ def rest_query(url, data, method='POST', headers={}):
                                                             port = port,
                                                             ssl = ssl)
         writer.write(query.encode())
-    except asyncio.ConnectionRefusedError:
+    except ConnectionRefusedError:
         raise APIError('connection refused')
-    except asyncio.ConnectionResetError:
+    except ConnectionResetError:
         raise APIError('connection reset while writing query')
 
     try:
         response = yield from reader.read()
-    except asyncio.ConnectionResetError:
+    except ConnectionResetError:
         raise APIError('connection reset while reading response')
 
     headers, content = response.decode().split("\r\n\r\n", 1)
@@ -493,7 +492,7 @@ def rest_query(url, data, method='POST', headers={}):
     if not status.startswith('2'):
         try:
             result = json.loads(content)
-        except:
+        except Exception:
             result = content
         raise APIHTTPError(status, result)
 
@@ -539,7 +538,7 @@ class Call(object):
         self.queue.running.add(self)
         self.queue.dt_run.append(self.t_run - self.t_call)
         uri = self.url
-        asyncio.async(rest_query(uri, self.params, self.method)).add_done_callback(self.callback)
+        asyncio.ensure_future(rest_query(uri, self.params, self.method)).add_done_callback(self.callback)
 
 
 class CallQueue(object):
@@ -558,8 +557,8 @@ class CallQueue(object):
     def cancel(self):
         while self.pending:
             self.pending.popleft().future.cancel()
-        for a in self.running:
-            a.future.cancel()
+        for task in self.running:
+            task.future.cancel()
 
     def drain(self):
         if not self.pending:
@@ -568,19 +567,20 @@ class CallQueue(object):
             return
         self.pending.popleft().run()
 
-    def call(self, url, params = {}, timeout = 60.0, method = 'POST'):
+    def call(self, url, params = None, timeout = 60.0, method = 'POST'):
+        params = params or {}
         self.n_call += 1
-        a = Call(self, url, params, timeout, method)
-        self.pending.append(a)
+        new_call = Call(self, url, params, timeout, method)
+        self.pending.append(new_call)
         self.n_max_pending = max(self.n_max_pending, len(self.pending))
         self.drain()
-        return a.future
+        return new_call.future
 
     def stats(self):
-        def mean(l):
-            if not l:
+        def mean(length):
+            if not length:
                 return 0
-            return sum(l) / len(l)
+            return sum(length) / len(length)
         res = { 'call': self.n_call,
                 'pending': len(self.pending),
                 'pending-max': self.n_max_pending,
@@ -595,7 +595,7 @@ class CallQueue(object):
                 'done-min': self.dt_done and min(self.dt_done) or 0,
                 'done-max': self.dt_done and max(self.dt_done) or 0,
                 'done-mean': mean(self.dt_done),
-            }
+              }
         self.n_call = 0
         self.n_max_pending = len(self.pending)
         self.dt_run = []
@@ -603,37 +603,36 @@ class CallQueue(object):
         return res
 
     def log_stats(self, name = None, queue = None):
-        s = self.stats()
+        stats = self.stats()
         threadless.log.info("%s: event=call-queue, queue=%s, calls=%i, pending=%i, pending-max=%i, running=%i, run=%i(min=%.2f,max=%.2f,mean=%.2f), done=%i(min=%.2f,max=%.2f,mean=%.2f)",
                             name or 'async',
                             queue or self.name,
-                            s['call'],
-                            s['pending'],
-                            s['pending-max'],
-                            s['running'],
-                            s['run'],
-                            s['run-min'],
-                            s['run-max'],
-                            s['run-mean'],
-                            s['done'],
-                            s['done-min'],
-                            s['done-max'],
-                            s['done-mean'])
+                            stats['call'],
+                            stats['pending'],
+                            stats['pending-max'],
+                            stats['running'],
+                            stats['run'],
+                            stats['run-min'],
+                            stats['run-max'],
+                            stats['run-mean'],
+                            stats['done'],
+                            stats['done-min'],
+                            stats['done-max'],
+                            stats['done-mean'])
 
 class RESTCaller(object):
 
     name = 'agent'
-    q = None
 
     def __init__(self, name = None, running_max = None):
         if name:
             self.name = name
         if running_max:
-            self.q = CallQueue(name, running_max)
+            self.queue = CallQueue(name, running_max)
 
     def call(self, url, params = None, method = 'POST'):
         try:
-            res = yield from self.q.call(url, params, method = method)
+            res = yield from self.queue.call(url, params, method = method)
         except APIError as exc:
             threadless.log.warn('%s: api-error, url=%s, error=%s', self.name, url, exc)
             raise
