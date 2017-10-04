@@ -1,7 +1,7 @@
 #
 # Copyright (c) 2016 Gilles Chehade <gilles@poolp.org>
 # Copyright (c) 2013 Eric Faurot <eric@faurot.net>
-# 
+#
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
 # copyright notice and this permission notice appear in all copies.
@@ -26,8 +26,9 @@ import threadless.log
 class Agent(object):
 
     configured = False
-    
+
     def __init__(self):
+        self.start_time = 0
         self.thread = threadless.async.Threadlet("agent")
 
     def uptime(self):
